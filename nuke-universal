@@ -1,0 +1,354 @@
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/gen2"))()
+
+local window = Rayfield:CreateWindow({
+    Name = "Murder Dules",
+    Subtitle = "By luhscripter",
+    LoadingTitle = "Loading Suite...",
+    LoadingSubtitle = "Please Wait",
+    Theme = "Default"
+})
+
+_G.SilentAim = false
+_G.Wallbang = false
+_G.AutoShoot = false
+
+_G._ESP = false
+_G.ESP_Boxes = false
+_G.ESP_HealthBars = false
+_G.ESP_Highlights = false
+
+local t1 = {}
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local Camera = Workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+t1.value4 = UserInputService
+t1.value5 = Workspace
+t1.value6 = Camera
+t1.value7 = LocalPlayer
+
+_G.FOV_RADIUS = 999999
+t1.value8 = nil
+
+local MAX_DISTANCE = 300
+local BOX_COLOR = Color3.fromRGB(255, 255, 255)
+local HEALTH_BG_COLOR = Color3.fromRGB(50, 0, 0)
+local HEALTH_GOOD_COLOR = Color3.fromRGB(0, 255, 0)
+local HEALTH_LOW_COLOR = Color3.fromRGB(255, 0, 0)
+local FRIEND_COLOR = Color3.fromRGB(0, 0, 255)
+local ENEMY_COLOR = Color3.fromRGB(255, 0, 0)
+
+local MainTab = window:CreateTab({ Name = "Main", Icon = 4483362458 })
+local VisualsTab = window:CreateTab({ Name = "Visuals", Icon = 4370318685 })
+
+MainTab:CreateToggle({
+    Name = "Silent Aim",
+    Callback = function(value) _G.SilentAim = value end,
+})
+
+MainTab:CreateToggle({
+    Name = "Wallbang",
+    Callback = function(value) _G.Wallbang = value end,
+})
+
+MainTab:CreateToggle({
+    Name = "AutoShoot",
+    Callback = function(value) _G.AutoShoot = value end,
+})
+
+VisualsTab:CreateToggle({
+    Name = "Enable ESP",
+    Callback = function(value) _G.Master_ESP = value end,
+})
+
+VisualsTab:CreateToggle({
+    Name = "Show Boxes",
+    Callback = function(value) _G.ESP_Boxes = value end,
+})
+
+VisualsTab:CreateToggle({
+    Name = "Show Health Bars",
+    Callback = function(value) _G.ESP_HealthBars = value end,
+})
+
+VisualsTab:CreateToggle({
+    Name = "Highlight Enemy",
+    Callback = function(value) _G.ESP_Highlights = value end,
+})
+
+local function getCharacterBounds(character)
+    local minX, minY = math.huge, math.huge
+    local maxX, maxY = -math.huge, -math.huge
+    local onScreenAny = false
+
+    for _, part in ipairs(character:GetChildren()) do
+        if part:IsA("BasePart") then
+            local cframe, size = part.CFrame, part.Size
+            local halfSize = size / 2
+
+            local vertices = {
+                cframe * Vector3.new(-halfSize.X, -halfSize.Y, -halfSize.Z),
+                cframe * Vector3.new(halfSize.X, -halfSize.Y, -halfSize.Z),
+                cframe * Vector3.new(-halfSize.X, halfSize.Y, -halfSize.Z),
+                cframe * Vector3.new(halfSize.X, halfSize.Y, -halfSize.Z),
+                cframe * Vector3.new(-halfSize.X, -halfSize.Y, halfSize.Z),
+                cframe * Vector3.new(halfSize.X, -halfSize.Y, halfSize.Z),
+                cframe * Vector3.new(-halfSize.X, halfSize.Y, halfSize.Z),
+                cframe * Vector3.new(halfSize.X, halfSize.Y, halfSize.Z)
+            }
+
+            for _, vertex in ipairs(vertices) do
+                local screenPos, onScreen = Camera:WorldToViewportPoint(vertex)
+                if onScreen then
+                    onScreenAny = true
+                    if screenPos.X < minX then minX = screenPos.X end
+                    if screenPos.X > maxX then maxX = screenPos.X end
+                    if screenPos.Y < minY then minY = screenPos.Y end
+                    if screenPos.Y > maxY then maxY = screenPos.Y end
+                end
+            end
+        end
+    end
+    return onScreenAny, Vector2.new(minX, minY), Vector2.new(maxX, maxY)
+end
+
+local function applyHighlight(player, color)
+    if player.Character then
+        local highlight = player.Character:FindFirstChild("GetReal")
+        if _G.Master_ESP and _G.ESP_Highlights then
+            if not highlight then
+                highlight = Instance.new("Highlight")
+                highlight.Name = "GetReal"
+                highlight.Adornee = player.Character
+                highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                highlight.Parent = player.Character
+            end
+            highlight.FillColor = color
+            highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+        else
+            if highlight then
+                highlight:Destroy()
+            end
+        end
+    end
+end
+local function createESP(player)
+    if player == LocalPlayer then return end
+
+    local box = Drawing.new("Square")
+    local healthBarBg = Drawing.new("Line")
+    local healthBar = Drawing.new("Line")
+
+    box.Color = BOX_COLOR; box.Thickness = 1; box.Filled = false
+    healthBarBg.Thickness = 2; healthBarBg.Color = HEALTH_BG_COLOR
+    healthBar.Thickness = 2
+
+    local function clearAllVisibility()
+        box.Visible = false
+        healthBarBg.Visible = false
+        healthBar.Visible = false
+    end
+
+    local connection
+    connection = RunService.RenderStepped:Connect(function()
+        local character = player.Character
+        local myCharacter = LocalPlayer.Character
+        
+        if not character or not character:IsDescendantOf(workspace) or not myCharacter then
+            clearAllVisibility()
+            if not player:IsDescendantOf(Players) then
+                box:Remove(); healthBarBg:Remove(); healthBar:Remove()
+                connection:Disconnect()
+            end
+            return
+        end
+
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        local myRootPart = myCharacter:FindFirstChild("HumanoidRootPart")
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        
+        local assignedColor = (LocalPlayer.TeamColor == player.TeamColor) and FRIEND_COLOR or ENEMY_COLOR
+        applyHighlight(player, assignedColor)
+
+        if rootPart and myRootPart and humanoid and humanoid.Health > 0 and _G.Master_ESP then
+            local distance = (myRootPart.Position - rootPart.Position).Magnitude
+            if distance > MAX_DISTANCE then
+                clearAllVisibility()
+                return
+            end
+
+            local isValid, topLeft, bottomRight = getCharacterBounds(character)
+            if isValid then
+                local boxWidth = bottomRight.X - topLeft.X
+                local boxHeight = bottomRight.Y - topLeft.Y
+
+                if _G.ESP_Boxes then
+                    box.Size = Vector2.new(boxWidth + 4, boxHeight + 4)
+                    box.Position = Vector2.new(topLeft.X - 2, topLeft.Y - 2)
+                    box.Visible = true
+                else
+                    box.Visible = false
+                end
+
+                if _G.ESP_HealthBars then
+                    local healthPercentage = humanoid.Health / humanoid.MaxHealth
+                    local healthBarX = topLeft.X - 6
+                    
+                    healthBarBg.From = Vector2.new(healthBarX, bottomRight.Y + 2)
+                    healthBarBg.To = Vector2.new(healthBarX, topLeft.Y - 2)
+                    healthBarBg.Visible = true
+
+                    local healthHeight = (boxHeight + 4) * healthPercentage
+                    healthBar.From = Vector2.new(healthBarX, bottomRight.Y + 2)
+                    healthBar.To = Vector2.new(healthBarX, (bottomRight.Y + 2) - healthHeight)
+                    healthBar.Color = HEALTH_LOW_COLOR:Lerp(HEALTH_GOOD_COLOR, healthPercentage)
+                    healthBar.Visible = true
+                else
+                    healthBarBg.Visible = false
+                    healthBar.Visible = false
+                end
+            else
+                clearAllVisibility()
+            end
+        else
+            clearAllVisibility()
+        end
+    end)
+end
+
+for _, player in ipairs(Players:GetPlayers()) do createESP(player) end
+Players.PlayerAdded:Connect(createESP)
+
+function t1.value10(p6, p7)
+    if _G.Wallbang then
+        return true 
+    end
+    local CFramePosition = t1.value6.CFrame.Position
+    local v24 = p6.Position - CFramePosition
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    raycastParams.FilterDescendantsInstances = {t1.value7.Character, p7, t1.value6}
+    raycastParams.IgnoreWater = true
+    return t1.value5:Raycast(CFramePosition, v24, raycastParams) == nil
+end
+
+RunService.RenderStepped:Connect(function()
+    if _G.SilentAim then
+        local targetNode = nil
+        local currentMaxDist = _G.FOV_RADIUS
+        local currentMousePos = t1.value4:GetMouseLocation()
+        local characterFolder = t1.value5:FindFirstChild("Characters")
+        local structuralTargets = characterFolder and characterFolder:GetChildren() or t1.value5:GetChildren()
+        
+        for _, v in ipairs(structuralTargets) do
+            if v:IsA("Model") and v ~= t1.value7.Character then
+                local Humanoid = v:FindFirstChildOfClass("Humanoid")
+                if Humanoid and Humanoid.Health > 0 then
+                    local mySide = t1.value7:GetAttribute("MatchSide")
+                    local enemySide = v:GetAttribute("MatchSide")
+                    
+                    if mySide and enemySide and mySide == enemySide then
+                        if v:GetAttribute("BotMatchBot") ~= true and v:GetAttribute("Decoy") ~= true then
+                            continue
+                        end
+                    end
+                    
+                    local structuralPart = v:FindFirstChild("Head") or v:FindFirstChild("HumanoidRootPart")
+                    if structuralPart then
+                        local screenPos, onScreen = t1.value6:WorldToViewportPoint(structuralPart.Position)
+                        
+                        if onScreen or _G.Wallbang then
+                            local distance = (Vector2.new(screenPos.X, screenPos.Y) - currentMousePos).Magnitude
+                            if distance < currentMaxDist and t1.value10(structuralPart, v) then
+                                targetNode = structuralPart
+                                currentMaxDist = distance
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        t1.value8 = targetNode 
+    else
+        t1.value8 = nil
+    end
+end)
+
+t1.value11 = hookmetamethod(game, "__namecall", function(self, ...)
+    local method = getnamecallmethod()
+    local validCaller = not checkcaller()
+    local arguments = {...}
+
+    if validCaller and _G.SilentAim and t1.value8 then
+        local dataPacket = arguments[1]
+        if type(dataPacket) == "table" then
+            if method == "FireServer" then
+                if self.Name == "ThrowReplicate" then
+                    dataPacket.target = t1.value8.Position
+                    return t1.value11(self, unpack(arguments))
+                elseif self.Name == "ShootReplicate" then
+                    dataPacket.hitInstance = t1.value8
+                    dataPacket.hitPos = t1.value8.Position
+                    dataPacket.to = t1.value8.Position
+                    dataPacket.isCharacterHit = true
+                    
+                    if _G.Wallbang then
+                        dataPacket.origin = t1.value8.Position + Vector3.new(0, 1, 0)
+                    end
+                    
+                    if type(dataPacket.segments) == "table" and #dataPacket.segments > 0 then
+                        for _, seg in ipairs(dataPacket.segments) do
+                            seg.hitInstance = t1.value8
+                            seg.hitPos = t1.value8.Position
+                            seg.isCharacterHit = true
+                        end
+                    end
+                    return t1.value11(self, unpack(arguments))
+                end
+            elseif method == "Fire" then
+                if self.Name == "SpawnKnife" then
+                    dataPacket.target = t1.value8.Position
+                    return t1.value11(self, unpack(arguments))
+                elseif self.Name == "SpawnBullet" then
+                    dataPacket.hitInstance = t1.value8
+                    dataPacket.hitPos = t1.value8.Position
+                    dataPacket.to = t1.value8.Position
+                    dataPacket.isCharacterHit = true
+                    
+                    if _G.Wallbang then
+                        dataPacket.origin = t1.value8.Position + Vector3.new(0, 1, 0)
+                    end
+                    
+                    if type(dataPacket.segments) == "table" and #dataPacket.segments > 0 then
+                        for _, seg in ipairs(dataPacket.segments) do
+                            seg.hitInstance = t1.value8
+                            seg.hitPos = t1.value8.Position
+                            seg.isCharacterHit = true
+                        end
+                    end
+                    return t1.value11(self, unpack(arguments))
+                end
+            end
+        end
+    end
+    return t1.value11(self, ...)
+end)
+
+task.spawn(function()
+    if not game:IsLoaded() then
+        game.Loaded:Wait()
+    end
+    
+    local GuiService = game:GetService("GuiService")
+    
+    while task.wait(0.05) do 
+        if _G.AutoShoot and _G.SilentAim and t1.value8 and not GuiService.MenuIsOpen then
+            if t1.value4.MouseBehavior == Enum.MouseBehavior.LockCenter then
+                mouse1click()
+            end
+        end
+    end
+end)
